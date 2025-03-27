@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+import json
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -22,28 +23,47 @@ tfidf_matrix = tfidf.fit_transform(movies["genres"])
 # Compute similarity matrix
 cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
+movies["title"] = movies["title"].str.lower()
+movies["genres"] = movies["genres"].str.lower()
+
 # Map movie titles to indices
 indices = pd.Series(movies.index, index=movies["title"]).drop_duplicates()
 
 def get_recommendations(title, cosine_sim=cosine_sim):
+    title = title.lower()
+
     if title not in indices:
         return []
 
     idx = indices[title]
     sim_scores = list(enumerate(cosine_sim[idx]))
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[1:11] # Exclude the movie itself
+    sim_scores = sim_scores[1:11]
     movie_indices = [i[0] for i in sim_scores]
-    return movies.iloc[movie_indices][["title", "genres"]].to_dict(orient="records")
+
+    recommendations = movies.iloc[movie_indices][["title", "genres", "overview", "cast", "director", "runtime", "vote_average", "spoken_languages"]].copy()
+
+    def extract_language_names(lang_str):
+        try:
+            lang_list = json.loads(lang_str)
+            return [lang["name"] for lang in lang_list if "name" in lang]
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    recommendations["spoken_languages"] = recommendations["spoken_languages"].apply(extract_language_names)
+
+    recommendations["genres"] = recommendations["genres"].str.split(" ")
+
+    return recommendations.to_dict(orient="records")
 
 def get_recommendations_by_genre(genre):
-    # Filter movies containing the genre
+    genre = genre.lower()
+
     genre_movies = movies[movies["genres"].str.contains(genre, case=False, na=False)]
     
     if genre_movies.empty:
         return []
 
-    # Compute similarity scores for the filtered movies
     genre_indices = genre_movies.index.tolist()
     sim_scores = []
 
@@ -51,14 +71,27 @@ def get_recommendations_by_genre(genre):
         scores = list(enumerate(cosine_sim[idx]))
         sim_scores.extend(scores)
 
-    # Sort by similarity score
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[:10]  # Top 10 recommendations
+    sim_scores = sim_scores[:10]
 
-    # Get unique movie indices
     movie_indices = list(set([i[0] for i in sim_scores]))
     
-    return movies.iloc[movie_indices][["title", "genres"]].to_dict(orient="records")
+    recommendations = movies.iloc[movie_indices][["title", "genres", "overview", "cast", "director", "runtime", "vote_average", "spoken_languages"]].copy()
+
+    def extract_language_names(lang_str):
+        try:
+            lang_list = json.loads(lang_str)
+            return [lang["name"] for lang in lang_list if "name" in lang]
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    recommendations["spoken_languages"] = recommendations["spoken_languages"].apply(extract_language_names)
+
+    recommendations["genres"] = recommendations["genres"].str.split(" ")
+
+    return recommendations.to_dict(orient="records")
+
+
 
 @app.route("/")
 def home():
