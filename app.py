@@ -1,115 +1,49 @@
 from flask import Flask, request, jsonify, render_template
-import json
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from flask_cors import CORS
+from recommendations import get_recommendations, get_recommendations_by_genre, get_top_movies, get_recommendation_by_id, get_movie_by_title
 
 app = Flask(__name__)
-
-# Load dataset
-movies = pd.read_csv("./movie_dataset.csv")
-
-# Ensure necessary columns exist (modify as needed)
-if "title" not in movies.columns or "genres" not in movies.columns:
-    raise ValueError("Dataset must have 'title' and 'genres' columns.")
-
-# Process genres into a single string for each movie
-movies["genres"] = movies["genres"].fillna("").astype(str)
-
-# TF-IDF Vectorizer to convert genres into feature vectors
-tfidf = TfidfVectorizer(stop_words="english")
-tfidf_matrix = tfidf.fit_transform(movies["genres"])
-
-# Compute similarity matrix
-cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
-
-movies["title"] = movies["title"].str.lower()
-movies["genres"] = movies["genres"].str.lower()
-
-# Map movie titles to indices
-indices = pd.Series(movies.index, index=movies["title"]).drop_duplicates()
-
-def get_recommendations(title, cosine_sim=cosine_sim):
-    title = title.lower()
-
-    if title not in indices:
-        return []
-
-    idx = indices[title]
-    sim_scores = list(enumerate(cosine_sim[idx]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[1:11]
-    movie_indices = [i[0] for i in sim_scores]
-
-    recommendations = movies.iloc[movie_indices][["title", "genres", "overview", "cast", "director", "runtime", "vote_average", "spoken_languages"]].copy()
-
-    def extract_language_names(lang_str):
-        try:
-            lang_list = json.loads(lang_str)
-            return [lang["name"] for lang in lang_list if "name" in lang]
-        except (json.JSONDecodeError, TypeError):
-            return []
-
-    recommendations["spoken_languages"] = recommendations["spoken_languages"].apply(extract_language_names)
-
-    recommendations["genres"] = recommendations["genres"].str.split(" ")
-
-    return recommendations.to_dict(orient="records")
-
-def get_recommendations_by_genre(genre):
-    genre = genre.lower()
-
-    genre_movies = movies[movies["genres"].str.contains(genre, case=False, na=False)]
-    
-    if genre_movies.empty:
-        return []
-
-    genre_indices = genre_movies.index.tolist()
-    sim_scores = []
-
-    for idx in genre_indices:
-        scores = list(enumerate(cosine_sim[idx]))
-        sim_scores.extend(scores)
-
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-    sim_scores = sim_scores[:10]
-
-    movie_indices = list(set([i[0] for i in sim_scores]))
-    
-    recommendations = movies.iloc[movie_indices][["title", "genres", "overview", "cast", "director", "runtime", "vote_average", "spoken_languages"]].copy()
-
-    def extract_language_names(lang_str):
-        try:
-            lang_list = json.loads(lang_str)
-            return [lang["name"] for lang in lang_list if "name" in lang]
-        except (json.JSONDecodeError, TypeError):
-            return []
-
-    recommendations["spoken_languages"] = recommendations["spoken_languages"].apply(extract_language_names)
-
-    recommendations["genres"] = recommendations["genres"].str.split(" ")
-
-    return recommendations.to_dict(orient="records")
-
-
+CORS(app, origins=["http://localhost:8080"])
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
-@app.route("/recommend", methods=["POST"])
+@app.route("/search", methods=["POST"])
+def search():
+    data = request.json
+    title = data.get("title")
+    if not title:
+        return jsonify({"error": "Missing 'title' parameter"}), 400
+    return jsonify(get_movie_by_title(title))
+
+@app.route("/recommend_by_title", methods=["POST"])
 def recommend_post():
     data = request.json
     title = data.get("title")
-    genre = data.get("genre")
-    if title:
-        recommendations = get_recommendations(title)
-    elif genre:
-        recommendations = get_recommendations_by_genre(genre)
-    else:
-        return jsonify({"error": "Missing 'title' or 'genre' parameter"})
+    if not title:
+        return jsonify({"error": "Missing 'title' parameter"}), 400
+    return jsonify(get_recommendations(title))
 
-    return jsonify(recommendations)
+@app.route("/recommend_by_genre", methods=["POST"])
+def recommend_by_genre():
+    data = request.json
+    genre = data.get("genre")
+    if not genre:
+        return jsonify({"error": "Missing 'genre' parameter"}), 400
+    return jsonify(get_recommendations_by_genre(genre))
+
+@app.route("/top_movies", methods=["GET"])
+def top_movies():
+    return jsonify(get_top_movies())
+
+@app.route("/recommend/<int:id>", methods=["GET"])
+def recommend_by_id(id):
+    recommendations, movie = get_recommendation_by_id(id)
+    if not movie:
+        return jsonify({"error": "Movie not found"}), 404
+    return jsonify({"recommendations": recommendations, "movie": movie})
+
 
 if __name__ == "__main__":
     app.run(debug=True)
