@@ -3,7 +3,7 @@ from flask_cors import CORS
 from recommendations import get_recommendations, get_recommendations_by_genre, get_top_movies, get_recommendation_by_id, get_movie_by_title
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "https://cine-match-ochre.vercel.app"]}})
+CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "https://cine-match-ochre.vercel.app", "https://cine-matched.netlify.app/"]}})
 
 @app.route("/")
 def home():
